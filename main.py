@@ -1,50 +1,71 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    TrainingArguments,
+    Trainer,
+    BitsAndBytesConfig,
+)
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
 import torch
 
-# 🔹 Model name (you can change this)
+# 🔹 Model
 model_name = "mistralai/Mistral-7B-v0.1"
 
-# 🔹 Load tokenizer
+# 🔹 Tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer.pad_token = tokenizer.eos_token  # FIX
 
-# ✅ FIX: add pad token (VERY IMPORTANT)
-tokenizer.pad_token = tokenizer.eos_token
+# 🔹 Quantization config (NEW way)
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+)
 
-# 🔹 Load model (4-bit for lower VRAM)
+# 🔹 Load model
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     device_map="auto",
-    load_in_4bit=True,
-    torch_dtype=torch.float16
+    quantization_config=bnb_config,
 )
 
-# 🔹 Load dataset (your data.json file)
+# 🔥 LoRA setup (REQUIRED for training)
+peft_config = LoraConfig(
+    r=8,
+    lora_alpha=16,
+    target_modules=["q_proj", "v_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+
+model = get_peft_model(model, peft_config)
+
+# 🔹 Load dataset
 dataset = load_dataset("json", data_files="data.json")
 
-# 🔹 Tokenization function
+# 🔹 Tokenize
 def tokenize(example):
     return tokenizer(
         example["text"],
         truncation=True,
         padding="max_length",
-        max_length=128
+        max_length=128,
     )
 
-# 🔹 Apply tokenization
 dataset = dataset.map(tokenize, batched=True)
 
-# 🔹 Set format for PyTorch
+# 🔹 Format for training
 dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
-# 🔹 Training settings
+# 🔹 Training args
 training_args = TrainingArguments(
     output_dir="./jar-ai",
     per_device_train_batch_size=1,
     num_train_epochs=3,
     logging_steps=1,
     save_strategy="epoch",
-    fp16=True
+    fp16=True,
 )
 
 # 🔹 Trainer
@@ -54,9 +75,9 @@ trainer = Trainer(
     train_dataset=dataset["train"],
 )
 
-# 🔹 Train!
+# 🔹 Train
 trainer.train()
 
-# 🔹 Save model
+# 🔹 Save
 trainer.save_model("./jar-ai")
 tokenizer.save_pretrained("./jar-ai")
