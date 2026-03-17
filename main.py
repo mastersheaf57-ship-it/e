@@ -14,9 +14,9 @@ model_name = "mistralai/Mistral-7B-v0.1"
 
 # 🔹 Tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token  # FIX
+tokenizer.pad_token = tokenizer.eos_token
 
-# 🔹 Quantization config (NEW way)
+# 🔹 Quantization config
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_compute_dtype=torch.float16,
@@ -29,7 +29,7 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=bnb_config,
 )
 
-# 🔥 LoRA setup (REQUIRED for training)
+# 🔥 LoRA (REQUIRED)
 peft_config = LoraConfig(
     r=8,
     lora_alpha=16,
@@ -44,19 +44,21 @@ model = get_peft_model(model, peft_config)
 # 🔹 Load dataset
 dataset = load_dataset("json", data_files="data.json")
 
-# 🔹 Tokenize
+# 🔹 Tokenize + FIX labels
 def tokenize(example):
-    return tokenizer(
+    tokens = tokenizer(
         example["text"],
         truncation=True,
         padding="max_length",
         max_length=128,
     )
+    tokens["labels"] = tokens["input_ids"].copy()
+    return tokens
 
 dataset = dataset.map(tokenize, batched=True)
 
-# 🔹 Format for training
-dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
+# 🔹 Format
+dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
 
 # 🔹 Training args
 training_args = TrainingArguments(
